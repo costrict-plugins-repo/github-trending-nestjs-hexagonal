@@ -1,0 +1,50 @@
+{
+  "name": "nestjs-hexagonal",
+  "version": "1.4.0",
+  "description": "Claude Code plugin for NestJS bounded contexts with Hexagonal Architecture, DDD and CQRS. Ships a rulebook checker CLI.",
+  "type": "module",
+  "license": "MIT",
+  "repository": "https://github.com/softtor/nestjs-hexagonal",
+  "bin": {
+    "nestjs-hexagonal-check": "scripts/run.sh"
+  },
+  "files": [
+    ".claude-plugin",
+    "agents",
+    "calibration/fitted",
+    "hooks",
+    "rulebooks",
+    "scripts/check.ts",
+    "scripts/hooks",
+    "scripts/lib",
+    "scripts/prescan.ts",
+    "scripts/run.sh",
+    "shared",
+    "skills",
+    "CLAUDE.md",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "bun test ./scripts ./calibration/__tests__",
+    "check": "bun scripts/check.ts",
+    "check-types": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "9",
+    "@nestjs/common": "11",
+    "@nestjs/core": "11",
+    "@nestjs/cqrs": "11",
+    "@nestjs/testing": "11",
+    "@types/bun": "^1.4.2",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "7",
+    "typescript": "5.9.3",
+    "uuid": "11",
+    "vitest": "3"
+  }
+}

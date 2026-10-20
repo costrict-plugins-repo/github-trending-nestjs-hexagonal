@@ -1,0 +1,216 @@
+---
+name: using-nestjs-hexagonal
+description: Meta-skill that routes NestJS development tasks to the correct nestjs-hexagonal skill or agent. Activates when working on NestJS projects with hexagonal architecture, DDD, CQRS, bounded contexts, entities, value objects, repositories, event listeners, WebSocket broadcasting, or any architectural task in a NestJS codebase. This skill should be checked FIRST before any implementation in a NestJS hexagonal project.
+argument-hint: What you want to do (e.g., "create entity", "review module", "debug event")
+---
+
+# Using NestJS Hexagonal
+
+This is a routing skill. When working in a NestJS project that follows hexagonal architecture, check this skill FIRST to find the right tool for the job.
+
+---
+
+## Detection — When Does This Plugin Apply?
+
+This plugin applies when ANY of these are true:
+- Project has `@nestjs/core` and `@nestjs/cqrs` in dependencies
+- Project structure has `domain/`, `application/`, `infrastructure/` layers
+- Files contain `Entity`, `@EventsHandler`, `@CommandHandler`, `@QueryHandler`
+- User mentions: entity, value object, bounded context, CQRS, hexagonal, DDD, aggregate
+- CLAUDE.md references `nestjs-hexagonal` skills
+
+If detected, route ALL architectural tasks through this plugin's skills and agents.
+
+---
+
+## Routing Table — What Are You Doing?
+
+### Creating or Modifying Code
+
+| Task | Route to | Type |
+|------|----------|------|
+| Create new bounded context / module | `nestjs-hexagonal:create-subdomain` | Skill (orchestrator) |
+| Create pure entity | `nestjs-hexagonal:domain-agent` | Agent (Opus 5.5) |
+| Create value object | `nestjs-hexagonal:domain` | Skill |
+| Create domain event | `nestjs-hexagonal:domain` | Skill |
+| Create repository interface | `nestjs-hexagonal:domain` | Skill |
+| Create data builder (testing) | `nestjs-hexagonal:domain` | Skill |
+| Create use case | `nestjs-hexagonal:application` | Skill |
+| Create CQRS command/query handler | `nestjs-hexagonal:application` | Skill |
+| Create DTO | `nestjs-hexagonal:application` | Skill |
+| Create port (cross-module interface) | `nestjs-hexagonal:application` | Skill |
+| Create Prisma repository | `nestjs-hexagonal:infrastructure` | Skill |
+| Wire NestJS module | `nestjs-hexagonal:infrastructure` | Skill |
+| Create adapter (port implementation) | `nestjs-hexagonal:infrastructure` | Skill |
+| Create controller | `nestjs-hexagonal:presentation` | Skill |
+| Create request DTO (class-validator) | `nestjs-hexagonal:presentation` | Skill |
+| Create event listener (same-BC) | `nestjs-hexagonal:event-listeners` | Skill |
+| Create event listener (cross-BC) | `nestjs-hexagonal:event-listeners` | Skill |
+| Create WebSocket broadcast | `nestjs-hexagonal:websocket-broadcasting` | Skill |
+| Create WS gateway | `nestjs-hexagonal:websocket-broadcasting` | Skill |
+| Create frontend event consumer | `nestjs-hexagonal:broadcasting-agent` | Agent (Sonnet 5) |
+
+### Reviewing or Debugging
+
+| Task | Route to | Type |
+|------|----------|------|
+| Map an existing module before changing it | `nestjs-hexagonal:explore-agent` | Agent (Haiku, read-only) |
+| Review bounded context | `nestjs-hexagonal:architecture-reviewer` | Agent (Opus 5.5) |
+| Check for over-engineering | `nestjs-hexagonal:architecture-reviewer` | Agent (Opus 5.5) |
+| Debug event not reaching frontend | `nestjs-hexagonal:event-debug-agent` | Agent (Opus 5.5) |
+| Debug event not being consumed | `nestjs-hexagonal:event-debug-agent` | Agent (Opus 5.5) |
+
+### Setting Up
+
+| Task | Route to | Type |
+|------|----------|------|
+| Configure GSD to use this plugin | `nestjs-hexagonal:gsd-installer` | Skill |
+| Onboard a project to the rulebook and hooks | `nestjs-hexagonal:onboard-project` | Skill |
+| Calibrate or evaluate a semantic (Jev) rule | `nestjs-hexagonal:jev-eval` | Skill |
+| Review all available patterns | Read `CLAUDE.md` at plugin root | Reference |
+
+---
+
+## Agent Selection by Model
+
+| Decision Type | Agent | Model | Why |
+|---|---|---|---|
+| Read-only map of an existing module | `explore-agent` | Haiku | Cheap scan (`prescan`) before Opus/Sonnet touch anything |
+| Domain modeling (what entities, VOs, events) | `domain-agent` | **Opus 5.5** | Critical architectural decisions |
+| Architecture review | `architecture-reviewer` | **Opus 5.5** | Deep judgment for smells + over-engineering |
+| Event chain debugging | `event-debug-agent` | **Opus 5.5** | 6-layer systematic tracing |
+| Application layer (use cases, handlers) | `application-agent` | Sonnet 5 | Follows established patterns |
+| Infrastructure (repos, modules) | `infrastructure-agent` | Sonnet 5 | Mechanical pattern application |
+| Presentation (controllers, DTOs) | `presentation-agent` | Sonnet 5 | Mechanical pattern application |
+| WebSocket + frontend | `broadcasting-agent` | Sonnet 5 | Follows WS skill patterns |
+| Event listeners | `listener-agent` | Sonnet 5 | Follows listener skill patterns |
+
+**Rule:** Use Haiku to LOOK (read-only map), Opus 5.5 for DECISIONS (what to build), Sonnet 5 for EXECUTION (how to build it).
+
+---
+
+## Package runner
+
+Skills and agents never hardcode a package manager. Before running a package script (`lint`, `check-types`, `test`, `build`) or adding a dependency, resolve the runner once per session from the lockfile at the project root (`$CLAUDE_PROJECT_DIR`, or the directory holding the `package.json` you are working in):
+
+| Lockfile present | `<runner>` (scripts) | `<add>` (dependencies) |
+|---|---|---|
+| `bun.lock` or `bun.lockb` | `bun run` | `bun add` (`bun add -d` for dev) |
+| `pnpm-lock.yaml` | `pnpm` | `pnpm add` (`pnpm add -D` for dev) |
+| `package-lock.json` | `npm run` | `npm install` (`npm install -D` for dev) |
+| `yarn.lock` | `yarn` | `yarn add` (`yarn add -D` for dev) |
+| none | ask the user | ask the user |
+
+```bash
+ls bun.lock bun.lockb pnpm-lock.yaml package-lock.json yarn.lock 2>/dev/null
+```
+
+Wherever a skill or agent writes `<runner> check-types`, substitute the resolved value (`bun run check-types`, `pnpm check-types`, ...). Monorepo filters (`--filter`, `--workspace`) and test path filters differ per tool; scope the command the way the project's own scripts do instead of translating flags.
+
+**User-level override.** The plugin declares an optional `package_runner` option in its `userConfig` (set it in `/plugin` or `/config`). Claude Code substitutes non-sensitive options into skill text, so the value configured for this user is: `${user_config.package_runner}`. If that shows blank or the literal token, no override is set and the lockfile table above applies. The override is per user (`pluginConfigs` in the user settings), never per project, and it does not reach the agent's Bash environment: `CLAUDE_PLUGIN_OPTION_PACKAGE_RUNNER` exists only in hook processes.
+
+---
+
+## Rulebook and CLI
+
+The architecture rules below also exist as a machine-readable rulebook (`rulebooks/hexagonal.rulebook.yaml`, plus `softtor-conventions` for multi-tenant, no-emoji and English-identifier conventions) and a checker CLI, `nestjs-hexagonal-check`. The CLI is the reference implementation of the rules; the prose in the skills explains how to satisfy them.
+
+```bash
+bunx nestjs-hexagonal-check --files 'src/<bc>/**/*.ts' --classes static --strict          # offline, exit 1 on a static FAIL
+bunx nestjs-hexagonal-check --files 'src/<bc>/**/*.ts' --classes static,semantic --format json   # semantic needs TYPESAFE_API_KEY
+bunx nestjs-hexagonal-check --diff origin/main --format text                              # only the files changed since a ref
+bunx nestjs-hexagonal-check prescan --files 'src/<bc>/**/*.ts'                            # cheap map: layer, kind, size, spec sibling (offline)
+bunx nestjs-hexagonal-check prescan --files 'src/<bc>/**/*.ts' --semantic                 # opt-in: sends each whole file (<= 8,000 tokens) + path to Jev, one kind question, no rule involved
+bunx nestjs-hexagonal-check stamp hexagonal softtor-conventions                          # extends block for a project rulebook
+```
+
+`node_modules/.bin/nestjs-hexagonal-check` works when `bunx` is unavailable. Every finding carries the rule id, severity, path, line, evidence and fix; semantic answers are decisions (`deny`, `ask`, `advise`, `uncertain`, `uncalibrated`) that never block in this version. Full flag reference: the README section "Rulebook & CLI".
+
+## Project rulebook (onboarding)
+
+A project opts in by creating `.claude/rulebook.yaml` that extends the plugin rulebooks with sha256 stamps; that file is also what turns the hooks on. The executable checklist is `nestjs-hexagonal:onboard-project` (stamp, rulebook, key, pinned CLI, first run). Calibrating or evaluating a semantic rule is `nestjs-hexagonal:jev-eval`.
+
+## Hooks
+
+With a project rulebook present, four hooks run around the plugin agents: `SubagentStart` injects the rulebook slice of the agent's layer, `PreToolUse` denies a Write or Edit that introduces a static FAIL, `PostToolUse` adds advisory findings, and `SubagentStop` blocks the stop of a pipeline agent while a touched file still has a static FAIL (at most twice, then it releases with the list). Semantic rules are advisory. Kill switch: `NESTJS_HEXAGONAL_DISABLE=1`. Details and disclosure of what is sent to Jev: README sections "Hooks" and "Disclosure".
+
+## Other harnesses (Codex, Cursor, OpenCode): run the CLI
+
+Skills, agents and hooks are Claude Code features. In any other harness the rulebook is still enforced by running the same CLI from the project: `bunx nestjs-hexagonal-check --diff <base> --classes static --strict` in a pre-commit or lint-staged step, `--format json` to feed a reviewer, `prescan` to map a module before editing it. The plugin ships as a dev dependency (`bun add -d github:Softtor/nestjs-hexagonal#v1.4.0`), so the binary and the rulebooks are versioned with the project.
+
+---
+
+## Architecture Rules (always enforce)
+
+These rules apply to ALL tasks routed through this plugin:
+
+1. **Entity is pure TypeScript** — uses `this.apply(event)` to queue events
+2. **Repository is PURE persistence** — no event dispatch, no domain logic
+3. **EventDispatcher in Handler ONLY** — UseCase returns entity, Handler publishes events
+4. **Module exports ONLY Port tokens** — never use cases, never repositories
+5. **class-validator ONLY in presentation** — never in domain or application
+6. **Write returns void or ID** — CQRS strict, no full objects on command side
+7. **No over-engineering** — no use case for trivial findById, no abstractions for single use
+8. **Listeners in CONSUMING BC** — cross-BC listeners live where they're consumed, not emitted
+9. **try/catch in all listeners** — listener failure never breaks the event chain
+
+---
+
+## Workflow Order (when building a full BC)
+
+```
+1. Domain (Opus 5.5)   → entities, VOs, events, repo interface, data builders
+2. Application       → use cases / handlers, DTOs, ports
+3. Infrastructure    → Prisma repo, module wiring, adapters, listeners
+4. Presentation      → controllers, request DTOs, Swagger
+5. Broadcasting      → WS gateway + frontend hooks (if real-time needed)
+6. Verification      → lint, types, tests, build (package runner from the lockfile)
+7. Review            → nestjs-hexagonal-check (static, then semantic) + residual review (Opus 5.5)
+```
+
+Use `nestjs-hexagonal:create-subdomain` to orchestrate this automatically.
+
+---
+
+## Pattern Quick Reference
+
+### Application Layer — Which Pattern?
+
+| Scenario | Pattern |
+|---|---|
+| Simple CRUD, no events needed | **A** — Plain UseCase + TOKEN |
+| Module uses CQRS, events on write | **B** — Command/Query handlers |
+| Complex orchestration, multiple ports | **C** — Handler as Orchestrator |
+| Trivial findById, no RBAC | **No pattern** — repo directly in controller |
+
+### Event Listeners — Which Type?
+
+| Scenario | Type |
+|---|---|
+| Update Redis projection after event | Same-BC listener |
+| Another BC reacts to this event | Cross-BC listener |
+| Frontend needs real-time update | Bridge listener (WS) |
+| External service needs notification | Bridge listener (broker/email/webhook) |
+| 3+ consumers sharing pre-processing | Strategy + Gateway pattern |
+| Simple side effect, single consumer | Put it in the command handler directly |
+
+---
+
+## Red Flags — Stop and Route
+
+If you catch yourself doing any of these, STOP and invoke the correct skill:
+
+| What you're about to do | Problem | Route to |
+|---|---|---|
+| Adding `@Injectable` to a domain class | Framework leak into domain | `nestjs-hexagonal:domain` |
+| Putting `EventDispatcher` in a UseCase | UseCase must be framework-agnostic | `nestjs-hexagonal:application` |
+| Exporting a repository from a module | Only Port tokens should be exported | `nestjs-hexagonal:infrastructure` |
+| Adding `class-validator` to a VO | Validation layers are separate | `nestjs-hexagonal:domain` |
+| Making repository dispatch events | Repository is pure persistence | `nestjs-hexagonal:infrastructure` |
+| Creating use case for simple findById | Over-engineering | Check architecture-reviewer criteria |
+| Importing a service from another BC | Use ports instead | `nestjs-hexagonal:application` (ports) |
+| Creating generic event relay | Over-engineering | `nestjs-hexagonal:event-listeners` |
+
+## Event dispatcher reference
+
+See [Fluent event dispatcher](../application/references/event-dispatcher.md) for typed named events, instance preservation, container providers, transaction ordering, queue acknowledgement, adapters and migration compatibility.

@@ -1,0 +1,490 @@
+# Project-agnostic rulebook for NestJS bounded contexts built with
+# Hexagonal Architecture + DDD + CQRS. Sources point at the check ids of
+# skills/review-subdomain/SKILL.md (D1..M4) and the smells listed in
+# agents/architecture-reviewer.md. Static rules run offline; semantic rules
+# are asked to Jev when TYPESAFE_API_KEY is set; runtime rules are still inert.
+$schema: nestjs-hexagonal/rulebook@1
+id: hexagonal
+version: 1.4.0
+extends: []
+model:
+  provider: typesafe
+  pin: jev-1.13.0
+
+rules:
+  # --------------------------------------------------------------------------
+  # static FAIL
+  # --------------------------------------------------------------------------
+  - id: hex/domain-no-nest-decorators
+    title: Domain has no framework or infrastructure imports
+    layer: domain
+    scope:
+      include: ['**/domain/**/*.ts']
+      exclude: ['**/__tests__/**', '**/*.spec.ts', '**/*.test.ts']
+    class: static
+    severity: FAIL
+    rationale: >-
+      The domain layer must compile without NestJS, Prisma or any adapter.
+      Entities queue events locally through apply(); publication belongs to
+      the application dispatcher after persistence has committed.
+    fix: >-
+      Remove the import and the decorator. Inject dependencies through a port
+      in the application layer; keep entities and value objects plain classes.
+    source: review-subdomain D1, D3, D6, M3; architecture-reviewer leaky abstraction
+    check:
+      kind: forbidden-import
+      modules: ['@nestjs/*', '@prisma/client', 'prisma', '**/infrastructure/**']
+    tags: [purity]
+
+  - id: hex/entity-unique-id
+    title: Entities extend the Entity base and use UniqueEntityID
+    layer: domain
+    scope:
+      include: ['**/domain/entities/**/*.entity.ts']
+      exclude: ['**/__tests__/**']
+    class: static
+    severity: FAIL
+    rationale: >-
+      Every aggregate carries its identity through the shared Entity base
+      (UniqueEntityID). Hand-rolled id fields break equality and event
+      correlation.
+    fix: >-
+      Declare the class as `extends Entity<Props>` and let the pure TypeScript
+      base own the id; never model ids as custom value objects. Legacy
+      AggregateRoot identity remains recognized during migration.
+    source: review-subdomain D5; harness unique-entity-id-required
+    check:
+      kind: regex
+      pattern: 'class\s+\w+\s+extends\s+(?:\w+\.)?(?:Entity|AggregateRoot)\b|UniqueEntityID'
+      mustMatch: true
+    tags: [identity]
+
+  - id: hex/vo-immutable
+    title: Value objects are immutable
+    layer: domain
+    scope:
+      include: ['**/domain/value-objects/**/*.ts']
+      exclude: ['**/__tests__/**', '**/*.spec.ts']
+    class: static
+    severity: FAIL
+    rationale: >-
+      A value object is defined by its value; mutation makes two equal values
+      diverge silently. Setters and mutable fields are not allowed.
+    fix: >-
+      Remove setters, mark fields `readonly` and return a new instance from
+      every operation that changes the value.
+    source: review-subdomain D2 context; harness value-object-immutable
+    check:
+      kind: regex
+      pattern: '^[ \t]*(?:public\s+)?set\s+\w+\s*\(|^[ \t]*(?:public|private|protected)\s+(?!readonly\b|static\b|constructor\b|abstract\b|get\b|set\b|async\b)\w+\s*[?!]?\s*[:=]'
+      flags: m
+    tags: [immutability]
+
+  - id: hex/repo-interface-in-domain
+    title: Domain repositories are interfaces, not classes
+    layer: domain
+    scope:
+      include: ['**/domain/repositories/**/*.ts', '**/domain/**/*repository.ts']
+      exclude: ['**/__tests__/**']
+    class: static
+    severity: FAIL
+    rationale: >-
+      The domain declares what persistence must offer; implementations live
+      in infrastructure. A class named *Repository in the domain is either an
+      implementation leak or an untestable stub.
+    fix: >-
+      Turn the class into an `interface` (plus a `Symbol` token) and move the
+      implementation to infrastructure/database.
+    source: review-subdomain D6; harness repo-interface-in-domain
+    check:
+      kind: regex
+      pattern: '^[ \t]*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+\w*Repository\b'
+      flags: m
+    tags: [ports]
+
+  - id: hex/module-exports-ports-only
+    title: Modules export only port tokens
+    layer: infrastructure
+    scope:
+      include: ['**/*.module.ts']
+      exclude: ['**/__tests__/**']
+    class: static
+    severity: FAIL
+    rationale: >-
+      Exporting use cases, handlers, repositories or services couples other
+      modules to concrete classes and bypasses the port boundary.
+    fix: >-
+      Export the `Symbol` tokens of the ports only and bind the concrete class
+      inside the module's providers.
+    source: review-subdomain I1; harness port-only-module-exports
+    check:
+      kind: regex
+      pattern: 'exports:\s*\[[^\]]*\b[A-Z]\w*(?:UseCase|Repository|Handler|Service|Controller)\b'
+    tags: [ports]
+
+  - id: hex/vo-no-class-validator
+    title: Value objects do not use class-validator
+    layer: domain
+    scope:
+      include: ['**/domain/value-objects/**/*.ts']
+      exclude: ['**/__tests__/**']
+    class: static
+    severity: FAIL
+    rationale: >-
+      Business invariants are enforced by a manual `validate()`;
+      class-validator belongs to presentation request DTOs only.
+    fix: Replace the decorators with explicit checks inside `validate()`.
+    source: review-subdomain D2, P1; harness no-class-validator-in-vo
+    check:
+      kind: forbidden-import
+      modules: ['class-validator']
+    tags: [validation]
+
+  - id: hex/no-circular-import
+    title: Modules do not rely on forwardRef
+    layer: infrastructure
+    scope:
+      include: ['**/*.module.ts']
+    class: static
+    severity: FAIL
+    rationale: >-
+      `forwardRef` hides a circular dependency between bounded contexts; the
+      fix is a port owned by one side, not a lazy reference.
+    fix: >-
+      Break the cycle: let one context define the port and the other implement
+      it, then remove `forwardRef`.
+    source: review-subdomain M3; architecture-reviewer circular dependency
+    check:
+      kind: regex
+      pattern: 'forwardRef\s*\('
+    tags: [modules]
+
+  - id: hex/event-payload-sufficient
+    title: Event handlers do not re-fetch what the event should carry
+    layer: infrastructure
+    scope:
+      include: ['**/infrastructure/**/*.ts']
+      exclude: ['**/__tests__/**', '**/*.spec.ts']
+    class: static
+    severity: FAIL
+    rationale: >-
+      An `@EventsHandler` that queries a repository to rebuild the context of
+      the event means the payload is insufficient; the event must carry the
+      data its consumers need.
+    fix: >-
+      Add the missing fields to the domain event and read them from the event
+      instead of querying the repository.
+    source: architecture-reviewer insufficient event payload
+    check:
+      kind: regex
+      whenPattern: '@EventsHandler\s*\('
+      pattern: 'this\.\w*(?:[rR]epositor(?:y|ies)|[rR]epo)\w*\.(?:find|get|search|load)\w*\s*\('
+    tags: [events]
+
+  # --------------------------------------------------------------------------
+  # static WARN
+  # --------------------------------------------------------------------------
+  - id: hex/handler-max-lines
+    title: Handlers stay short
+    layer: application
+    scope:
+      include: ['**/application/**/*.handler.ts']
+      exclude: ['**/__tests__/**']
+    class: static
+    severity: WARN
+    rationale: >-
+      A long `execute()` usually hides business rules that belong to the
+      aggregate (god handler smell). The budget counts the whole method,
+      signature and braces included.
+    fix: Move rules into entity methods and keep the handler to load, act, save, confirm the transaction, then publish through the dispatcher.
+    source: architecture-reviewer god handler
+    check:
+      kind: line-count
+      selector: method
+      name: execute
+      max: 30
+    tags: [size]
+
+  - id: hex/tests-use-builders
+    title: Tests build entities through data builders
+    layer: testing
+    scope:
+      include: ['**/domain/**/*.spec.ts', '**/application/**/*.spec.ts']
+    class: static
+    severity: WARN
+    rationale: >-
+      Inline entity props duplicate defaults across tests and break every
+      test when a prop is added; builders keep fixtures in one place.
+    fix: Import the `*DataBuilder` from domain/testing/helpers and override only what the test cares about.
+    source: review-subdomain D7, T5; architecture-reviewer test smell no data builders
+    check:
+      kind: required-import
+      modules: ['**/*data-builder*', '**/*.builder', '**/testing/helpers/**']
+      whenPattern: '\w+Entity\.create\s*\(|new\s+\w+Entity\s*\('
+    tags: [testing]
+
+  - id: hex/pattern-consistent
+    title: One application pattern per bounded context
+    layer: application
+    scope:
+      include: ['**/application/**/*.ts']
+      exclude: ['**/__tests__/**', '**/*.spec.ts']
+    class: static
+    severity: WARN
+    rationale: >-
+      Mixing plain use cases with TOKEN (A), CQRS handlers (B) and
+      orchestrator handlers (C) in the same bounded context makes the flow
+      unpredictable for readers and reviewers.
+    fix: Pick one pattern for the bounded context and migrate the outliers.
+    source: architecture-reviewer inconsistent pattern
+    check:
+      kind: external
+      executorId: hex/pattern-consistent
+    tags: [consistency]
+
+  - id: hex/no-overengineering-static
+    title: No single-use helpers or unused ports
+    layer: application
+    scope:
+      include: ['**/application/**/*.ts', '**/domain/**/*.ts']
+      exclude: ['**/__tests__/**', '**/*.spec.ts', '**/testing/**']
+    class: static
+    severity: WARN
+    rationale: >-
+      Counts that code can do: an exported helper with exactly one caller
+      should be inlined; a port token nobody injects should be removed.
+      Empty directories and small event tables are left to the reviewer.
+    fix: Inline the helper into its only caller or delete the unused port.
+    source: architecture-reviewer over-engineering audit (single-use abstraction, unused port)
+    check:
+      kind: external
+      executorId: hex/no-overengineering-static
+    tags: [yagni]
+
+  # --------------------------------------------------------------------------
+  # semantic (asked to Jev through scripts/lib/semantic-engine.ts; advisory
+  # until calibration/fitted/<pin>.json carries fitted thresholds. Rulebook
+  # thresholds only declare advise and the abstention band: ask and deny are
+  # taken from the fitted file, never from here)
+  # --------------------------------------------------------------------------
+  - id: hex/handler-no-business-rules
+    title: Handlers do not decide business rules
+    layer: application
+    scope:
+      include: ['**/application/**/*.handler.ts']
+      exclude: ['**/__tests__/**']
+    class: semantic
+    severity: FAIL
+    rationale: >-
+      A handler orchestrates: load, check existence, call the aggregate, save,
+      publish. A calculation or branch on domain state that decides the
+      business outcome is an invariant and belongs to the entity or value
+      object, where it has a unit test seam.
+    fix: Move the calculation or condition into an entity or value object method and call that method from the handler.
+    source: review-subdomain A4 context; architecture-reviewer god handler
+    question:
+      type: noul
+      instructions: >-
+        The handler's own code decides a business outcome from domain state.
+        Answer yes only when the handler body itself does at least one of
+        these: computes a business amount (total, discount, fee, tax,
+        balance) from entity fields; branches with if, switch or a ternary on
+        a domain field (status, amount, quantity, date, tier) and that branch
+        changes what is persisted or published; assigns entity properties
+        directly instead of calling an entity method; or picks the next
+        status of an entity itself. Answer no when the handler only does
+        orchestration: loads entities, throws when a record is missing or
+        belongs to another organization, checks permissions through a policy
+        or guard, maps input to a command or DTO, calls methods of the entity
+        or a domain service, re-reads and retries after a blocked or
+        conflicting save, saves, commits or publishes. Comments and names do
+        not count; judge the executable statements only.
+    state:
+      slice: declaration
+      contextLines: 0
+      maxTokens: 4000
+      preamble: >-
+        TypeScript CQRS command or query handler from the application layer
+        of a NestJS bounded context built with hexagonal architecture.
+        Invariants belong to aggregates and value objects; handlers only
+        orchestrate.
+    thresholds:
+      advise: 0.55
+      uncertain: { lo: 0.35, hi: 0.65 }
+    tags: [orchestration]
+
+  - id: hex/port-no-infra-leak
+    title: Ports do not leak infrastructure types
+    layer: application
+    scope:
+      include: ['**/application/ports/**/*.ts']
+    class: semantic
+    severity: FAIL
+    rationale: >-
+      A port is the application's contract; vendor, ORM, HTTP or queue
+      concepts in its signature bind every consumer to one adapter.
+    fix: Express the port in domain terms and translate to the vendor shape inside the adapter.
+    source: review-subdomain A6; architecture-reviewer leaky abstraction
+    question:
+      type: noul
+      instructions: >-
+        The port's signature exposes an infrastructure detail. Answer yes only
+        when a parameter type, return type, method name or imported type of
+        the exported interface names a vendor SDK client or payload, an ORM
+        model or query builder, an HTTP request, response, header or status
+        code, a queue or broker message, raw SQL, a file handle, or a cache
+        client. Answer no when the interface only uses domain entities, value
+        objects, primitives, Promise, Date, plain TypeScript objects declared
+        in the same file or the domain, and a Symbol token. Comments do not
+        count; judge the types and names in the signature only.
+    state:
+      slice: file
+      contextLines: 0
+      maxTokens: 3000
+      preamble: >-
+        TypeScript port (interface plus Symbol token) from the application
+        layer of a hexagonal NestJS bounded context.
+    thresholds:
+      advise: 0.55
+      uncertain: { lo: 0.35, hi: 0.65 }
+    tags: [ports]
+
+  - id: hex/entity-not-anemic
+    title: Entities carry behavior
+    layer: domain
+    scope:
+      include: ['**/domain/entities/**/*.entity.ts']
+      exclude: ['**/__tests__/**']
+    class: semantic
+    severity: WARN
+    rationale: >-
+      An entity that only exposes getters pushes every rule into handlers and
+      services (anemic model).
+    fix: Add methods that enforce the invariant and emit the domain event; remove setters.
+    source: architecture-reviewer anemic domain model
+    question:
+      type: noul
+      instructions: >-
+        The entity class is anemic. Answer yes only when every member of the
+        class is a constructor, a static create or restore factory, a getter,
+        a setter, a public field, toJSON or equals, so that no instance method
+        enforces a rule, throws on an invalid transition, changes state under
+        a condition or applies a domain event. Answer no when at least one
+        instance method does any of those things, even if the class also has
+        getters. Comments and method names do not count; judge the method
+        bodies only.
+    state:
+      slice: file
+      contextLines: 0
+      maxTokens: 4000
+      preamble: >-
+        TypeScript aggregate root from the domain layer of a hexagonal NestJS
+        bounded context.
+    thresholds:
+      advise: 0.55
+      uncertain: { lo: 0.35, hi: 0.65 }
+    tags: [ddd]
+
+  - id: hex/controller-thin
+    title: Controllers only translate HTTP
+    layer: presentation
+    scope:
+      include: ['**/controllers/**/*.controller.ts', '**/presentation/**/*.controller.ts']
+      exclude: ['**/__tests__/**']
+    class: semantic
+    severity: WARN
+    rationale: >-
+      A controller maps the request to a command, query or use case and
+      returns the result; anything else is logic without a test seam.
+    fix: Move the logic into a use case or handler and dispatch it from the controller.
+    source: review-subdomain P5; architecture-reviewer fat controller
+    question:
+      type: noul
+      instructions: >-
+        A controller method contains logic beyond translating the HTTP
+        request. Answer yes only when a method body does at least one of
+        these: calls a repository, ORM client or database directly;
+        instantiates or mutates a domain entity or value object; computes a
+        business value; or branches on domain data (status, amounts, roles
+        read from the record) to choose different behavior. Answer no when
+        the methods only read params, query, body and headers, apply guards,
+        pipes, decorators and validation DTOs, build a command, query or use
+        case input, dispatch it through a bus or an injected use case, map
+        the result to a response DTO or status code, and throw an HTTP
+        exception when the result is missing. Comments do not count; judge
+        the executable statements only.
+    state:
+      slice: declaration
+      contextLines: 0
+      maxTokens: 4000
+      preamble: >-
+        TypeScript NestJS REST controller from a hexagonal bounded context.
+        Controllers dispatch through CommandBus, QueryBus or injected use cases.
+    thresholds:
+      advise: 0.55
+      uncertain: { lo: 0.35, hi: 0.65 }
+    tags: [presentation]
+
+  - id: hex/no-overengineering
+    title: No abstraction without a second use
+    layer: application
+    scope:
+      include: ['**/application/**/*.ts']
+      exclude: ['**/__tests__/**', '**/*.spec.ts']
+    class: semantic
+    severity: WARN
+    rationale: >-
+      Three lines of code beat a premature abstraction; each of the listed
+      shapes adds a layer that a simpler call already covers.
+    fix: Remove the layer and call the simpler thing directly (repository, toJSON, use case, Prisma query).
+    source: architecture-reviewer over-engineering audit
+    question:
+      type: choice
+      instructions: >-
+        Which over-engineering shape, if any, does this file introduce? Judge
+        the executable code only; comments do not count.
+      options:
+        - id: trivial-use-case
+          criteria: A use case or handler whose execute method only calls a single findById, findAll or similar read and returns it, with no authorization check, side effect, event or mapping.
+        - id: redundant-mapper
+          criteria: An output mapper class or function that copies the same fields the entity's toJSON() or getters already return, field by field, without renaming, computing or omitting anything.
+        - id: delegating-service
+          criteria: A service class whose methods only forward their arguments to one use case or handler each, adding no logic, validation or composition.
+        - id: trivial-read-model
+          criteria: A read model, projection, cache or denormalized table maintained for a query that one indexed database query answers directly.
+        - id: none
+          criteria: The file does not introduce any of the shapes above; it has a validation, authorization, mapping, event, composition or a second consumer that justifies the layer.
+        - id: other
+          criteria: Something else that does not fit the options above.
+      violatingOptions: [trivial-use-case, redundant-mapper, delegating-service, trivial-read-model]
+    state:
+      slice: file
+      contextLines: 0
+      maxTokens: 4000
+      preamble: >-
+        TypeScript file from the application layer of a hexagonal NestJS
+        bounded context that prefers the simplest working shape.
+    thresholds:
+      advise: 0.55
+      minConfidence: 0.6
+    tags: [yagni]
+
+  # --------------------------------------------------------------------------
+  # runtime (declared; executed by the package test runner in a later version)
+  # --------------------------------------------------------------------------
+  - id: hex/tests-coverage
+    title: Every layer has specs and application specs use the in-memory repository
+    layer: testing
+    scope:
+      include: ['**/domain/**', '**/application/**', '**/controllers/**']
+    class: runtime
+    severity: WARN
+    rationale: >-
+      Entities, value objects, handlers and controllers each need a sibling
+      spec; application specs run against the in-memory repository.
+    fix: Add the missing __tests__/*.spec.ts and use the InMemoryRepository in application specs.
+    source: review-subdomain T1, T2, T3, T4, T5
+    runtime:
+      runner: package-test
+      gate: each entity, value object, handler and controller has a sibling __tests__/*.spec.ts and application specs import an InMemoryRepository
+    tags: [testing]

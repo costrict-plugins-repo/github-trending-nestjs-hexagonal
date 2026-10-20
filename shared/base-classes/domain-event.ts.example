@@ -1,0 +1,20 @@
+/** Pure domain event with stable identity and timestamp, including on retry. */
+export abstract class DomainEvent {
+  readonly eventName: string;
+  readonly aggregateId: string;
+  readonly occurredOn: Date;
+  readonly eventId: string;
+
+  protected constructor(eventName: string, aggregateId: string, occurredOn: Date = new Date(), eventId: string = crypto.randomUUID()) {
+    this.eventName = eventName;
+    this.aggregateId = aggregateId;
+    this.occurredOn = new Date(occurredOn.getTime());
+    this.eventId = eventId;
+  }
+}
+
+// Entity.create(): entity.apply(new CustomerCreatedEvent(entity.id, props.email));
+// Entity.restore(): reconstruct state, never apply creation events.
+// Handler: await repository.save(entity); await events.from(entity).publish();
+// With a transaction: publish only after the transaction has really committed.
+// EventBus adapter preserves class instances for @EventsHandler listeners.
